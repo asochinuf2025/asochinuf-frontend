@@ -34,14 +34,21 @@ try {
   console.warn('⚠️ No se pudo parsear URL, usando como está:', err.message);
 }
 
-// Crear pool PostgreSQL estándar (más compatible que Neon client)
-console.log('🚀 Iniciando pool PostgreSQL...');
+// Crear pool PostgreSQL con configuración para SSL
+console.log('🚀 Iniciando pool PostgreSQL con SSL...');
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  // Configuración óptima para Railway
-  max: 20,
+  // Configuración óptima para Railway + Neon
+  max: 10,
+  min: 2,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 15000,
+  // SSL configuration para Neon
+  ssl: {
+    rejectUnauthorized: false, // Necesario para Neon en algunos casos
+  },
+  // Configuración de aplicación
+  application_name: 'asochinuf-backend',
 });
 
 // Función auxiliar para reintentos con backoff exponencial
