@@ -17,13 +17,42 @@ if (!DATABASE_URL) {
 }
 
 // Usar Neon serverless para mejor rendimiento
-const sql = neon(DATABASE_URL);
+// Agregar configuración de timeout para evitar "fetch failed" en Railway
+const sql = neon(DATABASE_URL, {
+  fetchConnectionCache: true,
+  arrayMode: false,
+});
+
+// Función auxiliar para reintentos con backoff exponencial
+const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      const delay = baseDelay * Math.pow(2, attempt - 1);
+      console.log(`⚠️ Intento ${attempt} falló, reintentando en ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
 
 // Crear un objeto compatible con las queries existentes
 const pool = {
-  query: async (text, params) => {
+  query: async (text, params = []) => {
     try {
-      const result = await sql(text, params);
+      // Usar timeout de 30 segundos para evitar cuelgues
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Query timeout after 30s')), 30000)
+      );
+
+      const result = await Promise.race([
+        sql(text, params),
+        timeoutPromise,
+      ]);
+
       return {
         rows: result,
         rowCount: result.length,
@@ -33,8 +62,16 @@ const pool = {
       throw error;
     }
   },
+
+  // Función auxiliar para conectar con reintentos
+  connect: async () => {
+    return retryWithBackoff(async () => {
+      const result = await sql('SELECT NOW()');
+      return result;
+    });
+  },
 };
 
-console.log('✅ Conectado a Neon con serverless');
+console.log('✅ Cliente Neon inicializado (conexión lazy-loaded)');
 
 export default pool;

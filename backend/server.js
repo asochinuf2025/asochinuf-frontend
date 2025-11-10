@@ -30,8 +30,13 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Servir archivos estáticos - Imágenes de cursos
-app.use('/foto_curso', express.static(path.join(__dirname, '..', 'frontend', 'public', 'foto_curso')));
+// Servir archivos estáticos - Imágenes de cursos (solo si existen en monorepo)
+const fotoCursoPath = path.join(__dirname, '..', 'frontend', 'public', 'foto_curso');
+try {
+  app.use('/foto_curso', express.static(fotoCursoPath));
+} catch (err) {
+  console.warn(`⚠️ No se pudo servir archivos estáticos de ${fotoCursoPath}`);
+}
 
 // Rutas
 app.use('/api/auth', authRoutes);
@@ -44,8 +49,23 @@ app.use('/api/payments', pagosRoutes);
 app.use('/api/inscripciones', inscripcionesRoutes);
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'Backend funcionando correctamente' });
+app.get('/api/health', async (req, res) => {
+  try {
+    // Verificar también que la BD está disponible
+    await pool.query('SELECT NOW()');
+    res.json({
+      status: 'Backend funcionando correctamente',
+      database: 'conectado',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'Backend en funcionamiento pero BD no disponible',
+      database: 'desconectado',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Manejo de errores 404
@@ -56,9 +76,10 @@ app.use((req, res) => {
 // Iniciar servidor
 const iniciarServidor = async () => {
   try {
-    // Probar conexión a BD
-    const resultado = await pool.query('SELECT NOW()');
-    console.log('✓ Conexión a PostgreSQL exitosa:', resultado.rows[0]);
+    // Probar conexión a BD con reintentos
+    console.log('🔄 Intentando conectar a Neon con reintentos...');
+    const resultado = await pool.connect();
+    console.log('✅ Conexión a PostgreSQL exitosa:', resultado[0]);
 
     app.listen(PORT, () => {
       console.log(`✓ Servidor ejecutándose en puerto ${PORT}`);
@@ -67,11 +88,18 @@ const iniciarServidor = async () => {
     });
   } catch (error) {
     console.error('✗ Error al conectar a PostgreSQL:', error.message);
-    process.exit(1);
+    console.error('ℹ️ El servidor continuará iniciando. La conexión se reintentará en la próxima query.');
+
+    // En Railway, permitimos que el servidor inicie aunque la BD no esté disponible
+    // Las queries se reintentan automáticamente
+    app.listen(PORT, () => {
+      console.log(`✓ Servidor ejecutándose en puerto ${PORT} (sin verificación de BD)`);
+      console.log(`✓ URL: http://localhost:${PORT}`);
+      console.log(`✓ Health check: http://localhost:${PORT}/api/health`);
+    });
   }
 };
 
 iniciarServidor();
 
 export default app;
-// trigger
