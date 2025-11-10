@@ -1,5 +1,7 @@
-import { neon } from '@neondatabase/serverless';
+import pg from 'pg';
 import dotenv from 'dotenv';
+
+const { Pool } = pg;
 
 // Solo cargar .env en desarrollo
 if (process.env.NODE_ENV !== 'production') {
@@ -7,27 +9,40 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Verificar que DATABASE_URL esté disponible
-const DATABASE_URL = process.env.DATABASE_URL;
-console.log('🔍 DATABASE_URL:', DATABASE_URL ? 'Configurada' : 'NO CONFIGURADA');
+let DATABASE_URL = process.env.DATABASE_URL;
+console.log('🔍 DATABASE_URL recibida:', DATABASE_URL ? 'SÍ' : 'NO');
 console.log('🔍 NODE_ENV:', process.env.NODE_ENV);
 
-// Limpiar URL: remover channel_binding si existe
-let cleanURL = DATABASE_URL;
-if (DATABASE_URL && DATABASE_URL.includes('channel_binding')) {
-  const url = new URL(DATABASE_URL);
-  url.searchParams.delete('channel_binding');
-  cleanURL = url.toString();
-  console.log('🔧 URL limpiada: channel_binding removido');
-}
-
-if (!cleanURL) {
+if (!DATABASE_URL) {
   console.error('❌ ERROR: DATABASE_URL no está configurada');
   console.error('Variables de entorno disponibles:', Object.keys(process.env).filter(k => k.includes('DATABASE') || k.includes('NEON')));
   throw new Error('DATABASE_URL environment variable is required');
 }
 
-// Usar Neon serverless con URL limpia
-const sql = neon(cleanURL);
+// Limpiar URL: remover channel_binding y otros parámetros problemáticos
+try {
+  const url = new URL(DATABASE_URL);
+
+  // Remover parámetros que causan problemas en Railway
+  url.searchParams.delete('channel_binding');
+  url.searchParams.delete('application_name');
+
+  DATABASE_URL = url.toString();
+  console.log('🔧 URL limpiada: parámetros removidos');
+  console.log('🔍 URL limpia comienza con:', DATABASE_URL.substring(0, 60) + '...');
+} catch (err) {
+  console.warn('⚠️ No se pudo parsear URL, usando como está:', err.message);
+}
+
+// Crear pool PostgreSQL estándar (más compatible que Neon client)
+console.log('🚀 Iniciando pool PostgreSQL...');
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  // Configuración óptima para Railway
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
 
 // Función auxiliar para reintentos con backoff exponencial
 const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
@@ -45,24 +60,11 @@ const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
   }
 };
 
-// Crear un objeto compatible con las queries existentes
-const pool = {
+// Envolver el pool para agregar reintentos y timeouts
+const wrappedPool = {
   query: async (text, params = []) => {
     try {
-      // Usar timeout de 30 segundos para evitar cuelgues
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Query timeout after 30s')), 30000)
-      );
-
-      const result = await Promise.race([
-        sql(text, params),
-        timeoutPromise,
-      ]);
-
-      return {
-        rows: result,
-        rowCount: result.length,
-      };
+      return await pool.query(text, params);
     } catch (error) {
       console.error('❌ Error en la consulta:', error.message);
       throw error;
@@ -72,12 +74,26 @@ const pool = {
   // Función auxiliar para conectar con reintentos
   connect: async () => {
     return retryWithBackoff(async () => {
-      const result = await sql('SELECT NOW()');
-      return result;
+      const result = await pool.query('SELECT NOW()');
+      return result.rows;
     });
+  },
+
+  // Método para cerrar pool
+  end: async () => {
+    return pool.end();
   },
 };
 
-console.log('✅ Cliente Neon inicializado con WebSocket (optimizado para Railway)');
+// Event listeners para debugging
+pool.on('error', (err) => {
+  console.error('❌ Error inesperado en pool PostgreSQL:', err);
+});
 
-export default pool;
+pool.on('connect', () => {
+  console.log('✅ Nueva conexión PostgreSQL establecida');
+});
+
+console.log('✅ Pool PostgreSQL inicializado (usando pg driver)');
+
+export default wrappedPool;
