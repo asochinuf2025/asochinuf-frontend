@@ -1,5 +1,4 @@
-import { neon, neonConfig } from '@neondatabase/serverless';
-import ws from 'ws';
+import { neon } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
 
 // Solo cargar .env en desarrollo
@@ -7,27 +6,28 @@ if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
 
-// Configuración de Neon para WebSocket en serverless
-neonConfig.wsEndpoint = (host) => {
-  // Usar WebSocket para conexiones en Railway
-  return `wss://${host}/sql`;
-};
-
-// Usar ws como cliente WebSocket
-neonConfig.webSocketConstructor = ws;
-
 // Verificar que DATABASE_URL esté disponible
 const DATABASE_URL = process.env.DATABASE_URL;
 console.log('🔍 DATABASE_URL:', DATABASE_URL ? 'Configurada' : 'NO CONFIGURADA');
 console.log('🔍 NODE_ENV:', process.env.NODE_ENV);
-if (!DATABASE_URL) {
+
+// Limpiar URL: remover channel_binding si existe
+let cleanURL = DATABASE_URL;
+if (DATABASE_URL && DATABASE_URL.includes('channel_binding')) {
+  const url = new URL(DATABASE_URL);
+  url.searchParams.delete('channel_binding');
+  cleanURL = url.toString();
+  console.log('🔧 URL limpiada: channel_binding removido');
+}
+
+if (!cleanURL) {
   console.error('❌ ERROR: DATABASE_URL no está configurada');
   console.error('Variables de entorno disponibles:', Object.keys(process.env).filter(k => k.includes('DATABASE') || k.includes('NEON')));
   throw new Error('DATABASE_URL environment variable is required');
 }
 
-// Usar Neon serverless con configuración optimizada
-const sql = neon(DATABASE_URL);
+// Usar Neon serverless con URL limpia
+const sql = neon(cleanURL);
 
 // Función auxiliar para reintentos con backoff exponencial
 const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
