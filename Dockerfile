@@ -47,9 +47,10 @@ RUN mkdir -p /etc/nginx/conf.d
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Cambiar permisos
-RUN chmod 755 /usr/share/nginx/html
+RUN chmod -R 755 /usr/share/nginx/html && \
+    ls -la /usr/share/nginx/html/
 
-# Crear script de entrada
+# Crear script de entrada mejorado
 RUN mkdir -p /app/scripts && \
     echo '#!/bin/sh' > /app/scripts/entrypoint.sh && \
     echo 'set -e' >> /app/scripts/entrypoint.sh && \
@@ -58,10 +59,16 @@ RUN mkdir -p /app/scripts && \
     echo 'echo "Iniciando ASOCHINUF..."' >> /app/scripts/entrypoint.sh && \
     echo 'echo "========================================="' >> /app/scripts/entrypoint.sh && \
     echo '' >> /app/scripts/entrypoint.sh && \
+    echo 'echo "Archivos en /usr/share/nginx/html:"' >> /app/scripts/entrypoint.sh && \
+    echo 'ls -la /usr/share/nginx/html/' >> /app/scripts/entrypoint.sh && \
+    echo '' >> /app/scripts/entrypoint.sh && \
     echo 'echo "Iniciando Nginx en background..."' >> /app/scripts/entrypoint.sh && \
     echo 'nginx -g "daemon off;" > /var/log/nginx/access.log 2>&1 &' >> /app/scripts/entrypoint.sh && \
     echo 'NGINX_PID=$!' >> /app/scripts/entrypoint.sh && \
     echo 'echo "Nginx PID: $NGINX_PID"' >> /app/scripts/entrypoint.sh && \
+    echo 'sleep 2' >> /app/scripts/entrypoint.sh && \
+    echo 'echo "Verificando que Nginx está corriendo:"' >> /app/scripts/entrypoint.sh && \
+    echo 'ps aux | grep nginx' >> /app/scripts/entrypoint.sh && \
     echo '' >> /app/scripts/entrypoint.sh && \
     echo 'echo "Iniciando Backend Node.js en puerto 5001..."' >> /app/scripts/entrypoint.sh && \
     echo 'cd /app/backend' >> /app/scripts/entrypoint.sh && \
