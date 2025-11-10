@@ -46,13 +46,16 @@ COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 # Cambiar permisos
 RUN chmod 755 /usr/share/nginx/html
 
-# Script de entrada
-RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'nginx -g "daemon off;" &' >> /app/start.sh && \
-    echo 'cd /app/backend' >> /app/start.sh && \
-    echo 'npm start' >> /app/start.sh && \
-    chmod +x /app/start.sh
+# Crear script de entrada
+RUN echo '#!/bin/sh' > /app/entrypoint.sh && \
+    echo 'set -e' >> /app/entrypoint.sh && \
+    echo 'echo "Iniciando Nginx..."' >> /app/entrypoint.sh && \
+    echo 'nginx -g "daemon off;" &' >> /app/entrypoint.sh && \
+    echo 'NGINX_PID=$!' >> /app/entrypoint.sh && \
+    echo 'echo "Iniciando Backend Node.js..."' >> /app/entrypoint.sh && \
+    echo 'cd /app/backend && npm start' >> /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
 
-EXPOSE 80 5001
+EXPOSE 80
 
-CMD ["/app/start.sh"]
+CMD ["/app/entrypoint.sh"]
